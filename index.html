@@ -878,7 +878,7 @@ try{$('#nick').value=localStorage.getItem('aq_nick')||''}catch(e){}
 const NETV='aquarium-tw-v1',NETT=NETV+'/p/',myId=Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>b.toString(16).padStart(2,'0')).join('');
 let myName='',netMode='connecting',mqc=null,roomApi=null,sendT=0,lastSent='',lastCount=0,lastMode='';
 const others=new Map(),avatars=new Map(),LOCS=['lobby','hall','tunnel','atrium'];
-function setStatus(){const lab={connecting:'連線中…',mqtt:'● mqttgo.io 已連線',room:'● 即時房間（備援）',offline:'○ 離線（只有自己）'}[netMode];$('#onl').textContent='👥 館內人數 '+(others.size+1)+'　'+lab}
+function setStatus(){const lab={connecting:'連線中…',mqtt:'● mqttgo.io 已連線',room:'● 即時房間（備援）',offline:'○ 離線（只有自己）'}[netMode],er=netMode!=='mqtt'&&netErr?' · '+netErr.slice(0,48):'';$('#onl').textContent='👥 館內人數 '+(others.size+1)+'　'+lab+er;$('#onl').title=netErr}
 function clean(m){if(!m||typeof m!=='object'||typeof m.i!=='string'||!/^[0-9a-f]{6,16}$/.test(m.i))return null;
   const n=typeof m.n==='string'?m.n.replace(/[\u0000-\u001f<>]/g,'').slice(0,12):'訪客',f=v=>Number.isFinite(v)&&Math.abs(v)<2000;
   if(!LOCS.includes(m.l)||!f(m.x)||!f(m.y)||!f(m.q)||!f(m.w))return null;return{i:m.i,n:n||'訪客',l:m.l,z:(m.z|0),x:m.x,y:m.y,q:m.q,w:m.w}}
@@ -887,12 +887,20 @@ function onNetMsg(pl){let m;try{m=JSON.parse(pl.toString())}catch(e){return}if(!
 function tryRoom(){const cl=window.claude;if(!cl||!cl.use){netMode='offline';setStatus();return}
   cl.use('room').then(r=>{if(!r){netMode='offline';setStatus();return}roomApi=r;netMode='room';
     r.onPeers(ch=>{const seen=new Set();ch.peers.forEach(p=>{const a=p.presence&&p.presence.aq;if(p.isMe||!a)return;const c=clean(a);if(c){c.t=Date.now();c.room=true;seen.add(c.i);others.set(c.i,c)}});others.forEach((p,id)=>{if(p.room&&!seen.has(id))others.delete(id)})});setStatus()}).catch(()=>{netMode='offline';setStatus()})}
-function startNet(){setStatus();
-  if(!window.mqtt){tryRoom();return}
-  try{mqc=mqtt.connect('wss://broker.mqttgo.io:8084/mqtt',{clientId:'aq_'+myId,clean:true,keepalive:30,reconnectPeriod:4000,connectTimeout:8000,will:{topic:NETT+myId,payload:JSON.stringify({i:myId,g:1}),qos:0,retain:false}});
-    let ok=false;mqc.on('connect',()=>{ok=true;netMode='mqtt';mqc.subscribe(NETT+'+',{qos:0});setStatus()});
-    mqc.on('message',(t,pl)=>onNetMsg(pl));mqc.on('close',()=>{if(ok&&netMode==='mqtt'){netMode='connecting';setStatus()}});
-    setTimeout(()=>{if(!ok){try{mqc.end(true)}catch(e){}mqc=null;tryRoom()}},9000)}catch(e){tryRoom()}}
+const MQ_URLS=['wss://broker.mqttgo.io:8084/mqtt','ws://mqttgo.io:8000/mqtt'],MQ_LIBS=['https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js','https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js','https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js'];
+let netErr='',mqIdx=0;
+function loadMqtt(i=0){return new Promise((ok,no)=>{if(window.mqtt)return ok();if(i>=MQ_LIBS.length)return no(new Error('mqtt.js 載入失敗（網路或 CSP 擋住 CDN）'));
+  const sc=document.createElement('script');sc.src=MQ_LIBS[i];sc.onload=()=>window.mqtt?ok():loadMqtt(i+1).then(ok,no);sc.onerror=()=>loadMqtt(i+1).then(ok,no);document.head.appendChild(sc)})}
+function connectMq(){const url=MQ_URLS[mqIdx%MQ_URLS.length];
+  if(mqIdx>=MQ_URLS.length*2){tryRoom();return}
+  if(url.startsWith('ws://')&&location.protocol==='https:'){mqIdx++;connectMq();return}   // https pages may not open plain ws://
+  let ok=false,c;try{c=mqtt.connect(url,{clientId:'aq_'+myId,clean:true,keepalive:30,reconnectPeriod:4000,connectTimeout:8000,will:{topic:NETT+myId,payload:JSON.stringify({i:myId,g:1}),qos:0,retain:false}})}catch(e){netErr=String(e&&e.message||e);mqIdx++;connectMq();return}
+  mqc=c;c.on('connect',()=>{ok=true;netMode='mqtt';netErr='';c.subscribe(NETT+'+',{qos:0},err=>{if(err){netErr='訂閱失敗：'+err.message;setStatus()}});setStatus()});
+  c.on('message',(t,pl)=>onNetMsg(pl));
+  c.on('error',e=>{netErr=(e&&e.message)||String(e);console.warn('[mqtt]',url,e);setStatus()});
+  c.on('close',()=>{if(ok&&netMode==='mqtt'){netMode='connecting';setStatus()}});
+  setTimeout(()=>{if(!ok){try{c.end(true)}catch(e){}if(mqc===c)mqc=null;netErr=netErr||('連不上 '+url);mqIdx++;connectMq()}},9000)}
+function startNet(){setStatus();loadMqtt().then(connectMq).catch(e=>{netErr=e.message;console.warn(e);tryRoom()})}
 function netSend(st){if(mqc&&netMode==='mqtt'&&mqc.connected)mqc.publish(NETT+myId,JSON.stringify(st),{qos:0});else if(roomApi)roomApi.presence({aq:st}).catch(()=>{})}
 function netTick(){if(!myName)return;const now=Date.now();
   if(netMode==='mqtt')others.forEach((p,id)=>{if(now-p.t>8000)others.delete(id)});
