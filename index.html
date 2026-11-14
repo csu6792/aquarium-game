@@ -887,7 +887,7 @@ function onNetMsg(pl){let m;try{m=JSON.parse(pl.toString())}catch(e){return}if(!
 function tryRoom(){const cl=window.claude;if(!cl||!cl.use){netMode='offline';setStatus();return}
   cl.use('room').then(r=>{if(!r){netMode='offline';setStatus();return}roomApi=r;netMode='room';
     r.onPeers(ch=>{const seen=new Set();ch.peers.forEach(p=>{const a=p.presence&&p.presence.aq;if(p.isMe||!a)return;const c=clean(a);if(c){c.t=Date.now();c.room=true;seen.add(c.i);others.set(c.i,c)}});others.forEach((p,id)=>{if(p.room&&!seen.has(id))others.delete(id)})});setStatus()}).catch(()=>{netMode='offline';setStatus()})}
-const MQ_URLS=['wss://broker.mqttgo.io:8084/mqtt','ws://mqttgo.io:8000/mqtt'],MQ_LIBS=['https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js','https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js','https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js'];
+const MQ_URLS=['wss://mqttgo.io:8084/mqtt','ws://mqttgo.io:8000/mqtt'],MQ_LIBS=['https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js','https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js','https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js'];
 let netErr='',mqIdx=0;
 function loadMqtt(i=0){return new Promise((ok,no)=>{if(window.mqtt)return ok();if(i>=MQ_LIBS.length)return no(new Error('mqtt.js 載入失敗（網路或 CSP 擋住 CDN）'));
   const sc=document.createElement('script');sc.src=MQ_LIBS[i];sc.onload=()=>window.mqtt?ok():loadMqtt(i+1).then(ok,no);sc.onerror=()=>loadMqtt(i+1).then(ok,no);document.head.appendChild(sc)})}
